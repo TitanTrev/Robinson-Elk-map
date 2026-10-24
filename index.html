@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Robinson Elk Map</title>
+<meta name="description" content="Oregon elk hunting units with ODFW elk population, five years of harvest, and wolf pack data.">
+<meta property="og:title" content="Robinson Elk Map">
+<meta property="og:description" content="Oregon elk units, ODFW elk harvest 2021–2025, and wolf packs. Tap a unit for the numbers.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="vendor/leaflet.css">
+<style>
+/* Layout: full-bleed map; floating controls; unit details in a right drawer (desktop) or bottom sheet (phone). */
+:root{
+  --ground:#f4f2ec; --panel:#fbfaf7; --ink:#1f2421; --muted:#5d645f; --line:#d9d6cc;
+  --blaze:#e8590c; --blaze-ink:#fff; --wolf:#3f6fa8; --wolf-soft:rgba(63,111,168,.14);
+  --good:#2f7d4a; --warn:#b7791f; --bad:#b4372b; --chip:#ebe8df; --shadow:0 6px 24px rgba(20,24,22,.18);
+  --font-ui:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-sign:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --ground:#151816; --panel:#1c201e; --ink:#ecebe6; --muted:#a3a99f; --line:#343a36;
+  --blaze:#ff7a2e; --blaze-ink:#1a0e05; --wolf:#7fa8dc; --wolf-soft:rgba(127,168,220,.16);
+  --good:#6cc28b; --warn:#e3b04f; --bad:#ef7d70; --chip:#272c29; --shadow:0 6px 24px rgba(0,0,0,.5); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --ground:#151816; --panel:#1c201e; --ink:#ecebe6; --muted:#a3a99f; --line:#343a36;
+  --blaze:#ff7a2e; --blaze-ink:#1a0e05; --wolf:#7fa8dc; --wolf-soft:rgba(127,168,220,.16);
+  --good:#6cc28b; --warn:#e3b04f; --bad:#ef7d70; --chip:#272c29; --shadow:0 6px 24px rgba(0,0,0,.5); color-scheme:dark}
+html,body{height:100%;margin:0}
+body{background:var(--ground);color:var(--ink);font-family:var(--font-ui);font-size:15px;-webkit-text-size-adjust:100%}
+#map{position:fixed;inset:0;background:#d9d4c7}
+button{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--blaze);outline-offset:2px}
+
+/* top bar */
+.top{position:fixed;z-index:1000;top:calc(env(safe-area-inset-top,0px) + 10px);left:max(10px,env(safe-area-inset-left,0px));right:max(10px,env(safe-area-inset-right,0px));display:flex;gap:8px;align-items:flex-start;pointer-events:none}
+.brand,.finder,.iconbtn{pointer-events:auto;background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow);border-radius:10px}
+.brand{padding:6px 12px 7px;display:flex;flex-direction:column;line-height:1}
+.brand b{font-family:var(--font-sign);font-weight:700;font-size:20px;letter-spacing:.04em;text-transform:uppercase}
+.brand small{font-size:11px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-top:3px}
+.finder{display:flex;align-items:center;min-width:0;flex:0 1 230px}
+.finder select{appearance:none;-webkit-appearance:none;border:0;background:transparent;color:var(--ink);font:600 15px var(--font-ui);padding:10px 30px 10px 12px;width:100%;min-width:0;cursor:pointer}
+.finder{position:relative}
+.finder::after{content:"";position:absolute;right:12px;top:50%;width:7px;height:7px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:translateY(-70%) rotate(45deg);pointer-events:none}
+.spacer{flex:1}
+.iconbtn{width:44px;height:44px;display:grid;place-items:center;cursor:pointer;padding:0}
+.iconbtn svg{width:22px;height:22px;stroke:var(--ink);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.iconbtn[aria-expanded="true"]{background:var(--blaze);border-color:var(--blaze)}
+.iconbtn[aria-expanded="true"] svg{stroke:var(--blaze-ink)}
+
+/* layers panel */
+.layers{position:fixed;z-index:1003;top:calc(env(safe-area-inset-top,0px) + 62px);right:max(10px,env(safe-area-inset-right,0px));width:min(300px,calc(100vw - 20px));max-height:calc(100% - 90px - env(safe-area-inset-top,0px));overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:12px 14px 14px}
+.layers h3{font:700 13px var(--font-sign);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:10px 0 6px}
+.layers h3:first-child{margin-top:0}
+.opt{display:flex;align-items:center;gap:10px;padding:7px 2px;cursor:pointer;border-radius:6px}
+.opt input{accent-color:var(--blaze);width:18px;height:18px;margin:0;flex:none}
+.opt span{flex:1}
+.opt em{font-style:normal;font-size:12px;color:var(--muted);display:block}
+.swatch{width:22px;height:14px;border-radius:3px;flex:none;border:1px solid rgba(0,0,0,.2)}
+.opac{display:flex;align-items:center;gap:8px;padding:0 2px 6px 30px;font-size:12px;color:var(--muted)}
+.opac input{flex:1;accent-color:var(--blaze)}
+
+/* locate */
+.locate{position:fixed;z-index:1000;right:max(10px,env(safe-area-inset-right,0px));bottom:calc(env(safe-area-inset-bottom,0px) + 28px)}
+.coords{position:fixed;z-index:999;left:max(10px,env(safe-area-inset-left,0px));bottom:calc(env(safe-area-inset-bottom,0px) + 26px);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:4px 8px;font:500 12px var(--font-ui);font-variant-numeric:tabular-nums;color:var(--muted);box-shadow:var(--shadow)}
+.leaflet-control-attribution{font:11px var(--font-ui)!important;background:rgba(255,255,255,.8)!important}
+.leaflet-control-scale{margin-bottom:58px!important}
+
+/* unit labels + markers */
+.ulabel{font:700 12px var(--font-sign);letter-spacing:.06em;text-transform:uppercase;color:#1b1b1b;text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 2px #fff;white-space:nowrap;pointer-events:none;transform:translate(-50%,-50%);width:auto!important;height:auto!important}
+.ulabel span{display:block;text-align:center}
+.wpin{width:26px!important;height:26px!important;margin:-13px 0 0 -13px!important;border-radius:50%;background:var(--wolf);color:#fff;font:700 13px var(--font-sign);display:grid;place-items:center;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)}
+.wpin.nocount{background:#7b8a99}
+.leaflet-popup-content-wrapper{background:var(--panel);color:var(--ink);border-radius:10px}
+.leaflet-popup-tip{background:var(--panel)}
+.leaflet-popup-content{margin:12px 14px;font:14px/1.4 var(--font-ui)}
+.pop h4{margin:0 0 2px;font:700 18px var(--font-sign);letter-spacing:.03em}
+.pop .k{color:var(--muted);font-size:12px;margin-bottom:6px}
+.pop p{margin:6px 0}
+.pop a{color:var(--wolf)}
+
+/* drawer / sheet */
+.sheet{position:fixed;z-index:1002;background:var(--panel);box-shadow:var(--shadow);display:flex;flex-direction:column;overflow:hidden}
+@media (min-width:760px){
+  .sheet{top:calc(env(safe-area-inset-top,0px) + 66px);right:max(10px,env(safe-area-inset-right,0px));bottom:calc(env(safe-area-inset-bottom,0px) + 10px);width:420px;border-radius:14px;border:1px solid var(--line)}
+  .grab{display:none}
+}
+@media (max-width:519.98px){.brand{display:none}.finder{flex:1 1 auto}}
+@media (max-width:759.98px){
+  .sheet{left:0;right:0;bottom:0;max-height:62%;border-radius:16px 16px 0 0;border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
+  .sheet.tall{max-height:calc(100% - 70px - env(safe-area-inset-top,0px))}
+  .locate{bottom:calc(env(safe-area-inset-bottom,0px) + 28px)}
+}
+.grab{border:0;background:transparent;padding:8px 0 2px;cursor:pointer;display:block;width:100%}
+.grab i{display:block;width:44px;height:5px;border-radius:3px;background:var(--line);margin:0 auto}
+.shead{display:flex;align-items:flex-start;gap:10px;padding:10px max(16px,env(safe-area-inset-left,0px)) 10px max(16px,env(safe-area-inset-left,0px));border-bottom:1px solid var(--line)}
+.unitno{flex:none;background:var(--blaze);color:var(--blaze-ink);font:700 22px/1 var(--font-sign);padding:7px 9px 6px;border-radius:7px;font-variant-numeric:tabular-nums}
+.shead h2{margin:0;font:700 26px/1 var(--font-sign);letter-spacing:.03em;text-transform:uppercase;text-wrap:balance}
+.shead .sub{font-size:13px;color:var(--muted);margin-top:4px}
+.shead .x{margin-left:auto;flex:none;width:36px;height:36px;border-radius:8px;border:1px solid var(--line);background:transparent;cursor:pointer;display:grid;place-items:center}
+.shead .x svg{width:18px;height:18px;stroke:var(--ink);stroke-width:2.2;fill:none;stroke-linecap:round}
+.sbody{overflow:auto;-webkit-overflow-scrolling:touch;padding:4px max(16px,env(safe-area-inset-left,0px)) 24px max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:18px}
+.sec h3{margin:12px 0 8px;font:700 13px var(--font-sign);letter-spacing:.14em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:8px}
+.sec h3::after{content:"";flex:1;height:1px;background:var(--line)}
+.note{font-size:12.5px;color:var(--muted);line-height:1.45;margin:6px 0 0}
+.note a{color:inherit}
+
+/* population */
+.popgrid{display:grid;grid-template-columns:1fr auto;gap:4px 12px;align-items:end}
+.big{font:700 44px/0.95 var(--font-sign);font-variant-numeric:tabular-nums;letter-spacing:.01em}
+.big small{font:500 14px var(--font-ui);color:var(--muted);margin-left:6px;letter-spacing:0}
+.mo{font-size:13px;color:var(--muted)}
+.pill{display:inline-block;font:600 12px var(--font-ui);padding:2px 8px;border-radius:999px;background:var(--chip)}
+.pill.good{color:var(--good)} .pill.warn{color:var(--warn)} .pill.bad{color:var(--bad)}
+.ratios{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}
+.ratio{background:var(--chip);border-radius:8px;padding:8px 10px}
+.ratio b{font:700 22px var(--font-sign);font-variant-numeric:tabular-nums}
+.ratio span{display:block;font-size:12px;color:var(--muted)}
+.spark{width:100%;height:auto;display:block;margin-top:10px}
+.spark text{font:600 11px var(--font-ui);fill:var(--muted)}
+.herd{margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)}
+.herd:first-child{margin-top:0;padding-top:0;border-top:0}
+.herdname{font:600 13px var(--font-ui);margin-bottom:6px}
+
+/* harvest */
+.seg{display:inline-flex;background:var(--chip);border-radius:9px;padding:3px;gap:2px;margin-bottom:8px}
+.seg button{border:0;background:transparent;padding:6px 9px;border-radius:7px;font-weight:600;font-size:13px;cursor:pointer;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--panel);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.15)}
+.tblwrap{overflow-x:auto;margin:0 -2px}
+table{border-collapse:collapse;width:100%;table-layout:fixed;font-variant-numeric:tabular-nums;font-size:13px}
+col.c0{width:27%}
+th,td{padding:7px 3px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+th{font:600 12px var(--font-ui);color:var(--muted)}
+th:first-child,td:first-child{text-align:left;white-space:normal}
+td:first-child b{display:block;font-weight:600}
+td:first-child span{font-size:11.5px;color:var(--muted)}
+tr.total td{font-weight:700;border-bottom:0}
+td.zero{color:var(--muted)}
+.years{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 10px}
+.years button{border:1px solid var(--line);background:transparent;border-radius:999px;padding:5px 12px;font-weight:600;font-size:13px;cursor:pointer;font-variant-numeric:tabular-nums}
+.years button[aria-pressed="true"]{background:var(--ink);color:var(--panel);border-color:var(--ink)}
+.hunts{display:flex;flex-direction:column;gap:2px}
+.hunt{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;padding:8px 0;border-bottom:1px solid var(--line)}
+.hunt .hn{font-weight:600;font-size:14px;min-width:0}
+.hunt .ht{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.hunt .hs{text-align:right;font:700 18px var(--font-sign);font-variant-numeric:tabular-nums}
+.hunt .hd{grid-column:1/-1;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.tag{display:inline-block;font:700 10px var(--font-ui);letter-spacing:.08em;text-transform:uppercase;padding:1px 6px;border-radius:4px;margin-right:6px;vertical-align:1px}
+.tag.Rifle{background:rgba(232,89,12,.15);color:var(--blaze)}
+.tag.Archery{background:rgba(47,125,74,.15);color:var(--good)}
+.tag.Muzzleloader{background:rgba(183,121,31,.18);color:var(--warn)}
+
+/* wolves */
+.wolfhead{display:flex;gap:12px;align-items:center}
+.ring{flex:none;width:58px;height:58px}
+.ring text{font:700 15px var(--font-sign);fill:var(--ink)}
+.wolfhead p{margin:0;font-size:14px;line-height:1.4}
+.legal{margin-top:10px;font-size:13px;padding:8px 10px;border-radius:8px;background:var(--wolf-soft);line-height:1.4}
+.packs{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.pack{border:1px solid var(--line);border-radius:10px;padding:9px 11px}
+.pack .pt{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+.pack b{font:700 17px var(--font-sign);letter-spacing:.03em}
+.pack .cnt{font:700 17px var(--font-sign);color:var(--wolf);white-space:nowrap}
+.pack .cnt small{font:500 12px var(--font-ui);color:var(--muted)}
+.pack p{margin:4px 0 0;font-size:13px;line-height:1.4;color:var(--ink)}
+.pack .src{font-size:11.5px;color:var(--muted);margin-top:4px}
+.pack .src a{color:inherit}
+.empty{color:var(--muted);font-size:14px}
+
+/* welcome card */
+.hint{position:fixed;z-index:999;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 70px);background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:10px 14px;font-size:14px;max-width:min(360px,calc(100vw - 32px));text-align:center}
+.hint b{color:var(--blaze)}
+@media (prefers-reduced-motion:no-preference){.sheet{transition:max-height .2s ease}}
+</style>
+</head>
+<body>
+<div id="map" role="application" aria-label="Map of Oregon elk hunting units"></div>
+
+<div class="top">
+  <div class="brand"><b>Robinson Elk Map</b><small>Oregon · ODFW data</small></div>
+  <label class="finder"><span class="sr" hidden>Jump to unit</span><select id="finder" aria-label="Jump to a hunting unit"><option value="">Jump to a unit…</option></select></label>
+  <div class="spacer"></div>
+  <button class="iconbtn" id="layersBtn" aria-expanded="false" aria-controls="layers" title="Map layers"><svg viewBox="0 0 24 24"><path d="M12 3 2 8.5 12 14l10-5.5L12 3Z"/><path d="m2 13.5 10 5.5 10-5.5"/></svg></button>
+</div>
+
+<div class="layers" id="layers" hidden>
+  <h3>Base map</h3>
+  <div id="baseList"></div>
+  <h3>Overlays</h3>
+  <div id="overList"></div>
+  <p class="note">Tap any unit for elk and wolf numbers. Forest Service roads and trails show once you zoom in close.</p>
+</div>
+
+<button class="iconbtn locate" id="locateBtn" title="Show my location" aria-label="Show my location"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>
+<div class="coords" id="coords" hidden></div>
+
+<div class="hint" id="hint">Tap any <b>hunting unit</b> to see elk numbers, five years of harvest, and nearby wolf packs.</div>
+
+<aside class="sheet" id="sheet" hidden aria-label="Unit details">
+  <button class="grab" id="grab" aria-label="Expand or shrink details"><i></i></button>
+  <div class="shead">
+    <div class="unitno" id="uNum"></div>
+    <div><h2 id="uName"></h2><div class="sub" id="uSub"></div></div>
+    <button class="x" id="closeBtn" aria-label="Close details"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+  </div>
+  <div class="sbody" id="sbody"></div>
+</aside>
+
+<script src="vendor/leaflet.js"></script>
+<script>
+(function(){
+"use strict";
+const $=s=>document.querySelector(s);
+const fmt=n=>n==null?'—':n.toLocaleString('en-US');
+const store={get(k,d){try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v)}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+
+const map=L.map('map',{zoomControl:false,minZoom:6,maxZoom:18,zoomSnap:0.5,worldCopyJump:false,tap:true}).setView([44.1,-120.5],7);
+L.control.zoom({position:'bottomright'}).addTo(map);
+L.control.scale({imperial:true,metric:false,position:'bottomleft'}).addTo(map);
+map.attributionControl.setPrefix('<a href="https://leafletjs.com">Leaflet</a>');
+
+/* ---------- base maps ---------- */
+const ESRI='https://server.arcgisonline.com/ArcGIS/rest/services/';
+const USGS='https://basemap.nationalmap.gov/arcgis/rest/services/';
+const bases={
+  usgstopo:{name:'USGS Topo',desc:'Contours, place names, trails',layer:L.tileLayer(USGS+'USGSTopo/MapServer/tile/{z}/{y}/{x}',{maxNativeZoom:16,maxZoom:18,attribution:'USGS The National Map'})},
+  sat:{name:'Satellite',desc:'Esri World Imagery',layer:L.tileLayer(ESRI+'World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxNativeZoom:19,maxZoom:18,attribution:'Imagery © Esri, Maxar, Earthstar Geographics'})},
+  hybrid:{name:'Satellite + Topo',desc:'USGS imagery with topo labels',layer:L.tileLayer(USGS+'USGSImageryTopo/MapServer/tile/{z}/{y}/{x}',{maxNativeZoom:16,maxZoom:18,attribution:'USGS The National Map'})},
+  esritopo:{name:'Esri Topo',desc:'Detailed topo with road names',layer:L.tileLayer(ESRI+'World_Topo_Map/MapServer/tile/{z}/{y}/{x}',{maxNativeZoom:19,maxZoom:18,attribution:'© Esri, HERE, Garmin, USGS'})},
+  opentopo:{name:'OpenTopoMap',desc:'Contours and hillshade',layer:L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',{subdomains:'abc',maxNativeZoom:17,maxZoom:18,attribution:'© OpenStreetMap contributors, SRTM | © OpenTopoMap (CC-BY-SA)'})},
+  relief:{name:'Shaded Relief',desc:'Terrain only, no labels',layer:L.tileLayer(USGS+'USGSShadedReliefOnly/MapServer/tile/{z}/{y}/{x}',{maxNativeZoom:16,maxZoom:18,attribution:'USGS The National Map'})}
+};
+
+/* ArcGIS dynamic map service as 256px tiles (Forest Service, etc.) */
+const DynTile=L.TileLayer.extend({
+  getTileUrl(c){
+    const s=this.getTileSize(), nw=map.options.crs.project(map.unproject([c.x*s.x,c.y*s.y],c.z)), se=map.options.crs.project(map.unproject([(c.x+1)*s.x,(c.y+1)*s.y],c.z));
+    return this._url+'/export?bbox='+[nw.x,se.y,se.x,nw.y].join(',')+'&bboxSR=3857&imageSR=3857&size=256,256&format=png32&transparent=true&f=image&dpi=96'+(this.options.layers?'&layers=show:'+this.options.layers:'');
+  }
+});
+const FS='https://apps.fs.usda.gov/arcx/rest/services/EDW/';
+const overlays={
+  units:{name:'Elk hunting units',desc:'ODFW wildlife management units',sw:'#e8590c',on:true},
+  wolfArea:{name:'Known wolf use areas',desc:'ODFW map, Dec 31, 2025',sw:'#5b8dc9',on:true},
+  wolfPacks:{name:'Wolf packs',desc:'Number = wolves counted, end of 2025',sw:'#3f6fa8',on:true},
+  wolfLines:{name:'Wolf protection boundaries',desc:'Federal line (Hwys 395/78/95) and zone line',sw:'#1d4fa8',on:true},
+  fsRoads:{name:'Forest Service roads',desc:'National Forest system roads',sw:'#9b4d1a',on:false,minZoom:11,layer:new DynTile(FS+'EDW_RoadBasic_01/MapServer',{layers:'0,1',minZoom:11,maxZoom:18,opacity:.95,attribution:'USDA Forest Service'})},
+  mvum:{name:'Motor vehicle use (MVUM)',desc:'Roads and trails open to vehicles',sw:'#7a3fa0',on:false,minZoom:11,layer:new DynTile(FS+'EDW_MVUM_01/MapServer',{layers:'1,2',minZoom:11,maxZoom:18,attribution:'USDA Forest Service MVUM'})},
+  trails:{name:'Forest Service trails',desc:'National Forest system trails',sw:'#2f7d4a',on:false,minZoom:11,layer:new DynTile(FS+'EDW_TrailNFSPublish_01/MapServer',{minZoom:11,maxZoom:18,attribution:'USDA Forest Service'})},
+  land:{name:'Land ownership',desc:'BLM, Forest Service, state, private',sw:'linear-gradient(90deg,#fee39b 0 33%,#cde5b5 33% 66%,#f2f2f2 66%)',on:false,opacity:.45,layer:L.tileLayer('https://gis.blm.gov/arcgis/rest/services/lands/BLM_Natl_SMA_Cached_with_PriUnk/MapServer/tile/{z}/{y}/{x}',{maxNativeZoom:16,maxZoom:18,opacity:.45,attribution:'BLM Surface Management Agency'})}
+};
+
+let baseKey=store.get('elkmap.base','usgstopo'); if(!bases[baseKey]) baseKey='usgstopo';
+bases[baseKey].layer.addTo(map);
+
+/* ---------- panel UI for layers ---------- */
+const baseList=$('#baseList'), overList=$('#overList');
+Object.entries(bases).forEach(([k,b])=>{
+  const l=document.createElement('label'); l.className='opt';
+  l.innerHTML=`<input type="radio" name="base" id="base-${k}" value="${k}"${k===baseKey?' checked':''}><span>${b.name}<em>${b.desc}</em></span>`;
+  l.querySelector('input').addEventListener('change',()=>{map.removeLayer(bases[baseKey].layer);baseKey=k;bases[k].layer.addTo(map);bases[k].layer.bringToBack();store.set('elkmap.base',k)});
+  baseList.appendChild(l);
+});
+const overOn=store.get('elkmap.over',{});
+function buildOverUI(){
+  Object.entries(overlays).forEach(([k,o])=>{
+    if(k in overOn) o.on=!!overOn[k];
+    const l=document.createElement('label'); l.className='opt';
+    l.innerHTML=`<input type="checkbox" id="ov-${k}"${o.on?' checked':''}><i class="swatch" style="background:${o.sw}"></i><span>${o.name}<em>${o.desc}${o.minZoom?' · zoom in to see':''}</em></span>`;
+    l.querySelector('input').addEventListener('change',e=>{o.on=e.target.checked;overOn[k]=o.on;store.set('elkmap.over',overOn);applyOverlay(k)});
+    overList.appendChild(l);
+    if(k==='land'){
+      const r=document.createElement('div'); r.className='opac';
+      r.innerHTML=`<span>Opacity</span><input type="range" id="landOpacity" min="15" max="90" value="${Math.round(o.opacity*100)}" aria-label="Land ownership opacity">`;
+      r.querySelector('input').addEventListener('input',e=>o.layer.setOpacity(e.target.value/100));
+      overList.appendChild(r);
+    }
+  });
+}
+function applyOverlay(k){const o=overlays[k]; if(!o.layer) return; if(o.on) o.layer.addTo(map); else map.removeLayer(o.layer);}
+
+const layersBtn=$('#layersBtn'), layersPanel=$('#layers');
+layersBtn.addEventListener('click',()=>{const open=layersPanel.hidden; layersPanel.hidden=!open; layersBtn.setAttribute('aria-expanded',String(open));});
+map.on('click',()=>{if(!layersPanel.hidden){layersPanel.hidden=true;layersBtn.setAttribute('aria-expanded','false')}});
+
+/* ---------- locate + coordinates ---------- */
+let meMarker=null;
+$('#locateBtn').addEventListener('click',()=>{map.locate({setView:true,maxZoom:14,enableHighAccuracy:true})});
+map.on('locationfound',e=>{
+  if(meMarker) map.removeLayer(meMarker);
+  meMarker=L.layerGroup([L.circle(e.latlng,{radius:e.accuracy,weight:1,color:'#1a73e8',fillOpacity:.12}),L.circleMarker(e.latlng,{radius:7,weight:3,color:'#fff',fillColor:'#1a73e8',fillOpacity:1})]).addTo(map);
+  const u=unitAt(e.latlng); showCoords(e.latlng,u);
+});
+map.on('locationerror',()=>{const c=$('#coords');c.hidden=false;c.textContent='Location unavailable. Check location permission for this site.';setTimeout(()=>c.hidden=true,5000)});
+function showCoords(ll,u){const c=$('#coords');c.hidden=false;c.textContent=`${ll.lat.toFixed(5)}, ${ll.lng.toFixed(5)}${u?' · '+u.properties.UNIT_NAME.replace(/\b\w+/g,w=>w[0]+w.slice(1).toLowerCase())+' unit':''}`;}
+map.on('contextmenu',e=>showCoords(e.latlng,unitAt(e.latlng)));
+
+/* ---------- data ---------- */
+let ELK, WOLF, unitsLayer, unitFeatures=[], selected=null;
+const byNum={};
+function pip(pt,poly){ // ray casting on GeoJSON polygon rings
+  const x=pt.lng,y=pt.lat; let inside=false;
+  const rings=poly.type==='Polygon'?[poly.coordinates]:poly.coordinates;
+  for(const p of rings){for(const ring of p){for(let i=0,j=ring.length-1;i<ring.length;j=i++){const xi=ring[i][0],yi=ring[i][1],xj=ring[j][0],yj=ring[j][1];if(((yi>y)!==(yj>y))&&(x<(xj-xi)*(y-yi)/(yj-yi)+xi))inside=!inside;}}}
+  return inside;
+}
+function unitAt(ll){return unitFeatures.find(f=>f.properties.UNIT_NUM>1&&pip(ll,f.geometry))||null;}
+
+const unitStyle=f=>({color:'#2b2118',weight:1.6,opacity:.9,fillColor:'#e8590c',fillOpacity:f.properties.UNIT_NUM<=1?0:0.04});
+const selStyle={color:'#e8590c',weight:4,opacity:1,fillOpacity:0.12};
+
+Promise.all(['data/units.geojson','data/elk.json','data/wolves.json','data/wolf_area.geojson','data/wolf_lines.geojson'].map(u=>fetch(u).then(r=>{if(!r.ok)throw new Error(u);return r.json()})))
+.then(([units,elk,wolves,warea,wlines])=>{
+  ELK=elk; WOLF=wolves;
+  // wolf area
+  overlays.wolfArea.layer=L.geoJSON(warea,{style:{color:'#3f6fa8',weight:1.2,fillColor:'#5b8dc9',fillOpacity:.28},interactive:false});
+  overlays.wolfLines.layer=L.geoJSON(wlines,{style:f=>/Federal/.test(f.properties.kind)?{color:'#1d4fa8',weight:3.5,dashArray:'10 6'}:{color:'#d62020',weight:3,opacity:.8},interactive:true,onEachFeature:(f,l)=>l.bindTooltip(f.properties.kind+(/Federal/.test(f.properties.kind)?'. Wolves west of this line are federally endangered.':''),{sticky:true})});
+  // packs
+  const pg=L.layerGroup();
+  wolves.packs.forEach(p=>{
+    const m=L.marker([p.lat,p.lon],{icon:L.divIcon({className:'wpin'+(p.count==null?' nocount':''),html:p.count==null?'?':String(p.count)}),title:p.name+' wolves',keyboard:true});
+    m.bindPopup(packPopup(p),{maxWidth:280});
+    pg.addLayer(m);
+  });
+  overlays.wolfPacks.layer=pg;
+  // units
+  unitFeatures=units.features;
+  unitsLayer=L.geoJSON(units,{style:unitStyle,onEachFeature:(f,l)=>{
+    const n=f.properties.UNIT_NUM; byNum[n]={f,l};
+    if(n>1) l.on('click',e=>{L.DomEvent.stopPropagation(e);selectUnit(n,false)});
+    else l.options.interactive=false;
+  }});
+  const labels=L.layerGroup();
+  units.features.forEach(f=>{const p=f.properties; if(p.UNIT_NUM<=1) return;
+    labels.addLayer(L.marker([p.LY,p.LX],{interactive:false,keyboard:false,icon:L.divIcon({className:'ulabel',html:`<span>${p.UNIT_NAME}</span><span>${p.UNIT_NUM}</span>`,iconSize:null})}));});
+  overlays.units.layer=L.layerGroup([unitsLayer]);
+  const toggleLabels=()=>{const show=overlays.units.on&&map.getZoom()>=7; if(show&&!map.hasLayer(labels)) labels.addTo(map); if(!show&&map.hasLayer(labels)) map.removeLayer(labels);};
+  map.on('zoomend',toggleLabels);
+  const origApply=applyOverlay; applyOverlay=k=>{origApply(k); if(k==='units') toggleLabels(); orderLayers();};
+  buildOverUI();
+  Object.keys(overlays).forEach(k=>origApply(k));
+  orderLayers(); toggleLabels();
+  // finder
+  const sel=$('#finder');
+  units.features.filter(f=>f.properties.UNIT_NUM>1).sort((a,b)=>a.properties.UNIT_NAME.localeCompare(b.properties.UNIT_NAME)).forEach(f=>{
+    const o=document.createElement('option'); o.value=f.properties.UNIT_NUM; o.textContent=`${title(f.properties.UNIT_NAME)} (${f.properties.UNIT_NUM})`; sel.appendChild(o);});
+  sel.addEventListener('change',()=>{if(sel.value) selectUnit(+sel.value,true)});
+  // deep link #unit-48
+  const m=location.hash.match(/^#unit-(\d+)$/); if(m&&byNum[+m[1]]) selectUnit(+m[1],true);
+})
+.catch(err=>{const h=$('#hint');h.innerHTML='The map data didn’t load. Check your signal and reload the page.';console.error(err)});
+
+function orderLayers(){
+  if(overlays.wolfArea.layer&&map.hasLayer(overlays.wolfArea.layer)) overlays.wolfArea.layer.bringToBack&&overlays.wolfArea.layer.bringToFront();
+  if(unitsLayer&&map.hasLayer(unitsLayer)) unitsLayer.bringToFront();
+  if(overlays.wolfLines.layer&&map.hasLayer(overlays.wolfLines.layer)) overlays.wolfLines.layer.bringToFront();
+  if(selected&&byNum[selected]) byNum[selected].l.bringToFront();
+}
+const title=s=>s.toLowerCase().replace(/\b(\w)/g,c=>c.toUpperCase()).replace(/\bMtn\b/i,'Mtn');
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function packPopup(p){
+  return `<div class="pop"><h4>${esc(p.label||p.name)}</h4><div class="k">${p.count!=null?`${p.count} wolves counted at the end of 2025`:'Not listed separately in ODFW’s 2025 count table'}</div>${p.update?`<p>${esc(p.update)}</p><div class="k">ODFW update, ${esc(p.updated)} · <a href="${p.src}" target="_blank" rel="noopener">${esc(p.county)} County page</a></div>`:''}<div class="k">Pin marks where ODFW’s statewide map labels this pack, not a den or exact territory.</div></div>`;
+}
+
+/* ---------- unit details ---------- */
+const sheet=$('#sheet'), sbody=$('#sbody');
+let metric=store.get('elkmap.metric','total'); let huntYear=2025; if(!['total','bulls','hunters','success'].includes(metric)) metric='total';
+$('#closeBtn').addEventListener('click',closeSheet);
+$('#grab').addEventListener('click',()=>sheet.classList.toggle('tall'));
+function closeSheet(){sheet.hidden=true; if(selected&&byNum[selected]) unitsLayer.resetStyle(byNum[selected].l); selected=null; if(location.hash) history.replaceState(null,'',location.pathname+location.search);}
+
+function selectUnit(n,fly){
+  $('#hint').hidden=true;
+  if(selected&&byNum[selected]) unitsLayer.resetStyle(byNum[selected].l);
+  selected=n; const {f,l}=byNum[n]; l.setStyle(selStyle); l.bringToFront();
+  if(fly){ const b=l.getBounds(); const pad=window.innerWidth>=760?{paddingTopLeft:[20,70],paddingBottomRight:[450,20]}:{paddingTopLeft:[20,70],paddingBottomRight:[20,Math.round(window.innerHeight*.6)]}; map.fitBounds(b,pad); }
+  $('#finder').value=String(n);
+  history.replaceState(null,'','#unit-'+n);
+  render(n); sheet.hidden=false; sbody.scrollTop=0;
+}
+
+function render(n){
+  const u=ELK.units[n], f=byNum[n].f.properties, w=WOLF.units[n]||{packs:[],near:[],pctUse:0};
+  $('#uNum').textContent=n; $('#uName').textContent=title(f.UNIT_NAME);
+  $('#uSub').textContent=`${f.REGION==='EAST'?'Eastern':'Western'} Oregon · ${u.acres?Math.round(u.acres/640).toLocaleString()+' sq mi':''}`;
+  sbody.innerHTML=popSection(u)+harvestSection(u)+wolfSection(n,w)+sourcesSection();
+  sbody.querySelectorAll('[data-metric]').forEach(b=>b.addEventListener('click',()=>{metric=b.dataset.metric;store.set('elkmap.metric',metric);render(n)}));
+  sbody.querySelectorAll('[data-year]').forEach(b=>b.addEventListener('click',()=>{huntYear=+b.dataset.year;const st=sbody.scrollTop;render(n);sbody.scrollTop=st}));
+}
+
+function popSection(u){
+  if(!u.pop.length) return `<section class="sec"><h3>Elk population</h3><p class="empty">ODFW doesn’t publish an elk population estimate for this unit.</p></section>`;
+  const herds=u.pop.map(h=>{
+    const last=lastVal(h.pop), yr=last?2022+h.pop.lastIndexOf(last.v):null;
+    const pct=h.pct, cls=pct==null?'':pct>=90?'good':pct>=60?'warn':'bad';
+    const label=h.area+(h.herd?` · ${h.herd} elk`:'');
+    return `<div class="herd">${u.pop.length>1||h.shared?`<div class="herdname">${esc(label)}</div>`:`<div class="herdname">${esc(h.herd)} elk</div>`}
+      <div class="popgrid"><div class="big">${last?fmt(last.v):'—'}<small>elk${yr?` in ${yr}`:''}</small></div>
+      <div class="mo">${h.eda?'<span class="pill">De-emphasis area</span>':h.mo?`Objective ${fmt(h.mo)}<br><span class="pill ${cls}">${pct}% of objective</span>`:''}</div></div>
+      ${spark(h)}
+      <div class="ratios"><div class="ratio"><b>${lastStr(h.bulls)}</b><span>bulls per 100 cows${h.bullMo?` · goal ${h.bullMo}`:''}</span></div><div class="ratio"><b>${lastStr(h.calves)}</b><span>calves per 100 cows</span></div></div>
+      ${h.note?`<p class="note">${esc(h.note)}</p>`:''}</div>`;
+  }).join('');
+  return `<section class="sec"><h3>Elk population</h3>${herds}<p class="note">ODFW spring estimates. A repeated number usually means the herd wasn’t resurveyed that year.</p></section>`;
+}
+function lastVal(a){for(let i=a.length-1;i>=0;i--) if(a[i]!=null) return {v:a[i],i};return null}
+function lastStr(a){const l=lastVal(a);return l?`${l.v}<small style="font:500 12px var(--font-ui);color:var(--muted);margin-left:4px">(${2022+l.i})</small>`:'—'}
+function spark(h){
+  const ys=[2022,2023,2024,2025,2026], vals=h.pop, pts=vals.map((v,i)=>v==null?null:[i,v]).filter(Boolean);
+  if(pts.length<2) return '';
+  const all=pts.map(p=>p[1]).concat(h.mo?[h.mo]:[]); let lo=Math.min(...all), hi=Math.max(...all); if(hi===lo){hi+=1;lo-=1}
+  const pad=(hi-lo)*.15; lo=Math.max(0,lo-pad); hi+=pad;
+  const W=360,H=96,L0=8,R0=8,T0=14,B0=20, x=i=>L0+i*(W-L0-R0)/4, y=v=>T0+(H-T0-B0)*(1-(v-lo)/(hi-lo));
+  const d=pts.map((p,k)=>(k?'L':'M')+x(p[0]).toFixed(1)+' '+y(p[1]).toFixed(1)).join(' ');
+  const area=d+` L${x(pts[pts.length-1][0]).toFixed(1)} ${H-B0} L${x(pts[0][0]).toFixed(1)} ${H-B0} Z`;
+  const moLine=h.mo?`<line x1="${L0}" x2="${W-R0}" y1="${y(h.mo).toFixed(1)}" y2="${y(h.mo).toFixed(1)}" stroke="var(--muted)" stroke-dasharray="4 4" stroke-width="1"/><text x="${W-R0}" y="${(y(h.mo)-4).toFixed(1)}" text-anchor="end">objective</text>`:'';
+  const dots=pts.map(p=>`<circle cx="${x(p[0]).toFixed(1)}" cy="${y(p[1]).toFixed(1)}" r="${p===pts[pts.length-1]?4:2.5}" fill="var(--blaze)" stroke="var(--panel)" stroke-width="1.5"/>`).join('');
+  const labs=ys.map((yr,i)=>`<text x="${x(i).toFixed(1)}" y="${H-5}" text-anchor="${i===0?'start':i===4?'end':'middle'}">${yr}</text>`).join('');
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" role="img" aria-label="Population estimates 2022 to 2026"><path d="${area}" fill="var(--blaze)" opacity=".12"/>${moLine}<path d="${d}" fill="none" stroke="var(--blaze)" stroke-width="2.2"/>${dots}${labs}</svg>`;
+}
+
+const CATS=[['Rifle','Controlled','Rifle','controlled tags'],['Rifle','General','Rifle','general season'],['Archery','Controlled','Archery','controlled tags'],['Archery','General','Archery','general season'],['Muzzleloader','Controlled','Muzzleloader','controlled tags'],['Muzzleloader','General','Muzzleloader','general season']];
+const YEARS=[2021,2022,2023,2024,2025];
+function harvestSection(u){
+  const H=u.harvest; if(!H.length) return `<section class="sec"><h3>Elk harvest by hunt type</h3><p class="empty">No elk harvest is reported for this unit.</p></section>`;
+  // H rows: [year, weapon, season, hunt, hunters, days, antlerless, bulls, total, spike,2,3,4,5,6]
+  const agg={}; H.forEach(r=>{const k=r[1]+'|'+r[2]+'|'+r[0]; const a=agg[k]||(agg[k]={hunters:0,total:0,bulls:0,cows:0}); a.hunters+=r[4]; a.total+=r[8]; a.bulls+=r[7]; a.cows+=r[6];});
+  const cell=a=>{if(!a) return '<td class="zero">—</td>'; if(metric==='bulls') return `<td${a.bulls?'':' class="zero"'}>${fmt(a.bulls)}</td>`; if(metric==='hunters') return `<td>${fmt(a.hunters)}</td>`; if(metric==='success') return `<td>${a.hunters?Math.round(100*a.total/a.hunters)+'%':'—'}</td>`; return `<td${a.total?'':' class="zero"'}>${fmt(a.total)}</td>`;};
+  let rows='', tot={};
+  CATS.forEach(([w,s,lab,sub])=>{
+    if(!YEARS.some(y=>agg[w+'|'+s+'|'+y])) return;
+    rows+=`<tr><td><b>${lab}</b><span>${sub}</span></td>${YEARS.map(y=>{const a=agg[w+'|'+s+'|'+y]; if(a){const t=tot[y]||(tot[y]={hunters:0,total:0,bulls:0,cows:0}); t.hunters+=a.hunters;t.total+=a.total;t.bulls+=a.bulls;t.cows+=a.cows;} return cell(a)}).join('')}</tr>`;
+  });
+  rows+=`<tr class="total"><td>All hunts</td>${YEARS.map(y=>cell(tot[y])).join('')}</tr>`;
+  const bc=YEARS.map(y=>tot[y]?`<td>${fmt(tot[y].bulls)} / ${fmt(tot[y].cows)}</td>`:'<td class="zero">—</td>').join('');
+  const seg=`<div class="seg" role="group" aria-label="Show">${[['total','All elk'],['bulls','Bulls'],['hunters','Hunters'],['success','Success']].map(([k,t])=>`<button type="button" data-metric="${k}" aria-pressed="${metric===k}">${t}</button>`).join('')}</div>`;
+  const table=`<div class="tblwrap"><table><colgroup><col class="c0">${YEARS.map(()=>'<col>').join('')}</colgroup><thead><tr><th>Hunt type</th>${YEARS.map(y=>`<th>${y}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>`;
+  // hunt-by-hunt list for chosen year
+  const yrs=YEARS.filter(y=>H.some(r=>r[0]===y)); if(!yrs.includes(huntYear)) huntYear=yrs[yrs.length-1];
+  const list=H.filter(r=>r[0]===huntYear).sort((a,b)=>b[8]-a[8]||b[4]-a[4]).map(r=>{
+    const succ=r[4]?Math.round(100*r[8]/r[4]):null;
+    const pts=[['spike',r[9]],['2pt',r[10]],['3pt',r[11]],['4pt',r[12]],['5pt',r[13]],['6+',r[14]]].filter(p=>p[1]).map(p=>`${p[1]} ${p[0]}`).join(', ');
+    return `<div class="hunt"><div><div class="ht"><span class="tag ${r[1]}">${r[1]}</span>${r[2]==='General'?'General season':'Controlled'}</div><div class="hn">${esc(r[3])}</div></div><div class="hs">${fmt(r[8])}<div class="ht" style="text-align:right">elk</div></div>
+      <div class="hd">${fmt(r[4])} hunters · ${fmt(r[5])} days · ${fmt(r[7])} bulls, ${fmt(r[6])} antlerless · ${succ==null?'—':succ+'% success'}${pts?`<br>Bulls by antler points: ${pts}`:''}</div></div>`;
+  }).join('');
+  return `<section class="sec"><h3>Elk harvest by hunt type</h3>${seg}${table}
+    <p class="note">ODFW harvest estimates from mandatory hunter reports. Success is elk taken per hunter. Hunts that cross unit lines are split by where hunters reported hunting.</p>
+    <h3 style="margin-top:18px">Every hunt, one year at a time</h3>
+    <div class="years" role="group" aria-label="Season year">${yrs.map(y=>`<button type="button" data-year="${y}" aria-pressed="${y===huntYear}">${y}</button>`).join('')}</div>
+    <div class="hunts">${list}</div>${huntYear===2024?'<p class="note">ODFW still marks its 2024 harvest reports “Draft.”</p>':''}</section>`;
+}
+
+function wolfSection(n,w){
+  const byName={}; WOLF.packs.forEach(p=>byName[p.name]=p);
+  const list=[...w.packs.map(x=>[x,true]),...(w.near||[]).map(x=>[x,false])];
+  const total=w.packs.reduce((s,x)=>s+(byName[x]&&byName[x].count||0),0);
+  const r=22,C=2*Math.PI*r, pct=Math.max(0,Math.min(100,w.pctUse||0));
+  const ring=`<svg class="ring" viewBox="0 0 58 58" aria-hidden="true"><circle cx="29" cy="29" r="${r}" fill="none" stroke="var(--line)" stroke-width="7"/><circle cx="29" cy="29" r="${r}" fill="none" stroke="var(--wolf)" stroke-width="7" stroke-dasharray="${(C*pct/100).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 29 29)"/><text x="29" y="34" text-anchor="middle">${pct}%</text></svg>`;
+  const legal={listed:'This unit is west of Hwys 395/78/95, where wolves are federally endangered. Killing one is a federal crime.',delisted:'This unit is east of Hwys 395/78/95, where wolves are off the federal list but still protected under state law. Hunting wolves is not allowed.',split:'Hwys 395/78/95 cross this unit. West of the highway, wolves are federally endangered. East of it, state protections apply. Hunting wolves is not allowed on either side.'}[w.fed||'listed'];
+  const packs=list.length?list.map(([name,inside])=>{const p=byName[name]; if(!p) return '';
+    return `<div class="pack"><div class="pt"><b>${esc(p.label||p.name)}</b><span class="cnt">${p.count!=null?`${p.count} <small>wolves</small>`:'<small>count not listed</small>'}</span></div>
+      <div class="src">${inside?'Labeled inside this unit on ODFW’s map':'Labeled within about 10 miles of this unit'}</div>
+      ${p.update?`<p>${esc(p.update)}</p><div class="src">ODFW, ${esc(p.updated)} · <a href="${p.src}" target="_blank" rel="noopener">${esc(p.county)} County wolf page</a></div>`:''}</div>`}).join(''):`<p class="empty">ODFW’s map labels no packs in or right next to this unit.</p>`;
+  const notes=(w.notes||[]).map(t=>`<div class="pack"><p>${esc(t)}</p></div>`).join('');
+  return `<section class="sec"><h3>Wolves</h3>
+    <div class="wolfhead">${ring}<p><b>${pct}%</b> of this unit falls inside ODFW’s known wolf use areas.${w.packs.length?` Packs labeled in the unit totaled <b>${total}</b> wolves at the end of 2025.`:''}</p></div>
+    <div class="legal">${legal}</div>
+    <div class="packs">${packs}${notes}</div>
+    <p class="note">Counts are ODFW minimums from the winter count. The real number is higher, and spring 2026 pups aren’t counted yet. Wolf areas are traced from ODFW’s statewide PDF map and are accurate to roughly a mile.</p></section>`;
+}
+function sourcesSection(){
+  return `<section class="sec"><h3>Sources</h3><p class="note">
+  <a href="https://myodfw.com/articles/big-game-population-survey-data" target="_blank" rel="noopener">ODFW elk population estimates and herd composition, 2022–2026</a><br>
+  <a href="https://myodfw.com/articles/big-game-hunting-harvest-statistics" target="_blank" rel="noopener">ODFW elk harvest summaries, 2021–2025</a><br>
+  <a href="https://dfw.state.or.us/Wolves/Packs/index.asp" target="_blank" rel="noopener">ODFW wolf packs and Areas of Known Wolf Activity, Dec 31, 2025</a><br>
+  <a href="https://dfw.state.or.us/Wolves/docs/oregon_wolf_program/2025_Annual_Wolf_Report_FINAL_260417.pdf" target="_blank" rel="noopener">ODFW 2025 Annual Wolf Report</a><br>
+  Unit boundaries: ODFW Wildlife Management Units. Data compiled October 24, 2026.</p></section>`;
+}
+})();
+</script>
+</body>
+</html>
